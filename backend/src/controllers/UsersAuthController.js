@@ -66,9 +66,9 @@ const loginUsers = async (req, res) => {
       return res.status(400).json({ message: "Invalid email or password." });
     }
 
-    const accessToken = generateAccessToken(newUser.id);
+    const accessToken = generateAccessToken(user.id);
 
-    const refreshToken = generateRefreshToken(newUser.id);
+    const refreshToken = generateRefreshToken(user.id);
 
     res.status(200).json({
       message: "Login successful",
@@ -138,21 +138,30 @@ const getUserData = async (req, res) => {
 
 const logoutUsers = async (req, res) => {
   const { refreshToken } = req.body;
+  const redisClient = req.redisClient;
 
   if (!refreshToken) {
     return res.status(400).json({ message: "Refresh token required" });
   }
 
   try {
-    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const value = await redisClient.get(`blacklist:${refreshToken}`);
+    if (value === "true") {
+      return res
+        .status(403)
+        .json({ message: "Invalid or expired refresh token" });
+    }
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
     const expiresIn = decoded.exp * 1000 - Date.now();
 
-    await redisClient.set(`blacklist:${refreshToken}`, true, "PX", expiresIn); // using PX  ensures that Redis will automatically delete the key after the specified time in milliseconds
+    await redisClient.set(`blacklist:${refreshToken}`, "true", "PX", expiresIn); // using PX  ensures that Redis will automatically delete the key after the specified time in milliseconds
 
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
     console.error("Error logging out user:", error);
-    res.status(403).json({ message: "Invalid or expired refresh token" });
+    return res
+      .status(403)
+      .json({ message: "Invalid or expired refresh token" });
   }
 };
 
@@ -160,6 +169,7 @@ const logoutUsers = async (req, res) => {
 
 const refreshAccessToken = async (req, res) => {
   const { refreshToken } = req.body;
+  const redisClient = req.redisClient;
 
   if (!refreshToken) {
     return res.status(401).json({ message: "Refresh token required" });
@@ -173,7 +183,7 @@ const refreshAccessToken = async (req, res) => {
     }
 
     // Verify the refresh token
-    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
 
     const accessToken = generateAccessToken(decoded.userId);
 
